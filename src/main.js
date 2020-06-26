@@ -1,6 +1,6 @@
 const canvas = document.getElementById('canvas');
 const context = canvas.getContext('2d');
-
+const cloudiness = document.getElementById('cloudiness');
 
 const makeWave = (context) => ({
     x: context.canvas.width,
@@ -16,42 +16,61 @@ const animateWaves = (context, delta, waves) => waves
     });
 
 
-const makePlant = (context) => ({
-    x: Math.random() * (context.canvas.width / 2),
+const makePlant = (context, parent = null) => ({
+    x: parent
+        ? parent.x + ((Math.random() * 100) - 50)
+        : Math.random() * (context.canvas.width / 2),
     life: 0,
-    sun: 0,
+    sun: 1,
     water: 1,
-    speed: Math.random() / 100,
-    seeds: Math.floor(Math.max(1, Math.random() * 3))
+    speed: 0.05,
+    seeds: Math.floor(Math.max(2, Math.random() * 4)),
+    hue: parent ? parent.hue + ((Math.random() * 30) - 15) : Math.random() * 360,
 });
 
 const animatePlants = (context, delta, isSunny, plants) => plants
-    .map((plant) => ({
-        ...plant,
-        sun: (isSunny ? 1 : -1) * (0.01 * delta),
-        life: plant.life + (plant.speed * (plant.sun / 100 + plant.water / 100) * delta),
-    }))
+  .map((plant) => {
+    const sun = plant.sun + ((isSunny > 0.5 ? ((isSunny - 0.05) * 0.0000001) : 0) * delta);
+    const water = plant.water;
+
+    const growRate = sun > 0 && water > 0 ? 0.1 : 0;
+
+    return {
+      ...plant,
+      sun: Math.max(0, Math.min(1, sun - 0.1)),
+      water: Math.max(0, Math.min(1, water)),
+      life: Math.min(150, plant.life + (plant.speed * growRate * delta)),
+    }
+  })
     .reduce((nextPlants, plant) => {
         const maxLife = plant.life >= 100;
         const nextPlant = { ...plant };
         let childPlants = [];
         if (maxLife && Math.random() < 0.05 && nextPlant.seeds > 0) {
             nextPlant.seeds -= 1;
-            childPlants.push(makePlant(context));
+            childPlants.push(makePlant(context, nextPlant));
         }
         return maxLife && nextPlant.seeds === 0
             ? [...nextPlants, ...childPlants]
             : [...nextPlants, nextPlant, ...childPlants];
     }, [])
 
-const drawBackground = (context, isSunny) => {
+const drawBackground = (context, rain, isSunny) => {
     context.fillStyle = isSunny ? '#87ceeb' : '#566671';
+    context.fillRect(0, 0, context.canvas.width, context.canvas.height);
+    context.fillStyle = `hsla(100, 5%, 5%, ${1 - Math.max(0.4, isSunny)}`;
     context.fillRect(0, 0, context.canvas.width, context.canvas.height);
 
     context.fillStyle = '#f9d71c';
     context.fillRect(50, 50, 50, 50);
     context.strokeStyle = '#f9d71c';
     context.strokeRect(45, 45, 60, 60);
+
+    const x = (isSunny - 0.5) / 0.5 * (1280 - 600);
+    context.fillStyle = `hsla(0, 100%, 100%, 0.8)`;
+    context.fillRect(x, 70, 600, 100);
+    context.fillStyle = 'black';
+    context.fillText(`Rain: ${rain.length}`, x + 200, 90);
 }
 
 const drawDirt = (context, plants) => {
@@ -66,16 +85,34 @@ const drawDirt = (context, plants) => {
         context.fillRect(plant.x - 2, context.canvas.height - 15, 5, 5);
 
         const life = Math.min(plant.life, 50);
+        const petals = plant.life < 50
+          ? plant.life / 50 * 2
+          : 2 + (Math.max(50, plant.life) - 50) / 50 * 15;
 
+        //context.fillStyle = 'black';
+        //context.fillText(`Life: ${plant.life.toFixed(1)} | Petals: ${petals.toFixed(1)}`, plant.x, context.canvas.height - 60)
+
+        // Stalk
+        context.strokeStyle = 'black';
+        context.lineWidth = 3;
+        context.beginPath();
+        context.moveTo(plant.x, context.canvas.height - 15);
+        context.lineTo(plant.x, context.canvas.height - 15 - life);
+        context.stroke();
         context.strokeStyle = '#84e424';
-        context.lineWidth = 2;
+        context.lineWidth = 1;
         context.beginPath();
         context.moveTo(plant.x, context.canvas.height - 15);
         context.lineTo(plant.x, context.canvas.height - 15 - life);
         context.stroke();
 
-        context.fillStyle = 'black';
-        context.fillText(`Life: ${plant.life.toFixed(1)}`, plant.x, context.canvas.height - 60)
+        // Flower
+        
+        context.fillStyle = `hsla(${plant.hue}, 50%, 50%, 0.7)`;
+        context.beginPath();
+        context.arc(plant.x, context.canvas.height - 15 - life, petals, 0, 2 * Math.PI);
+        context.fill();
+
 
         context.restore();
     });
@@ -108,12 +145,14 @@ const drawWater = (context, waves) => {
         context.restore();
     })
 }
+
 const draw = (state) => {
     const now = performance.now();
     const delta = now - state.lastTimeWeRendered;
     state.lastTimeWeRendered = now;
     state.time += delta;
     state.nextWaveIn -= delta;
+    state.isSunny = cloudiness.value;
     if (state.nextWaveIn <= 0) {
         state.nextWaveIn = 300 + (Math.random() * 2000);
         state.waves.push(makeWave(context))
@@ -128,13 +167,9 @@ const draw = (state) => {
     // Clean any previous drawings
     context.clearRect(0, 0, context.canvas.width, context.canvas.height);
 
-    drawBackground(context, state.isSunny);
+    drawBackground(context, state.rain, state.isSunny);
     drawWater(context, state.waves);
     drawDirt(context, state.plants);
-
-
-    // Your drawing code here...
-    // Check out https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D
 
     // Restore the state of the canvas (back to initial/clean state)
     context.restore();
@@ -152,10 +187,7 @@ draw({
     plants: [
         makePlant(context),
         makePlant(context),
-        makePlant(context),
-        makePlant(context),
-        makePlant(context),
     ],
-    isSunny: true,
-    rain: 0,
+    isSunny: cloudiness.value,
+    rain: [],
 });
